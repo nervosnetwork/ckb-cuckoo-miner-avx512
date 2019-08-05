@@ -2,15 +2,13 @@ mod exit_code;
 mod sentry;
 
 use crate::exit_code::ExitCode;
-use crate::sentry::{SentryConfig, sentry_init};
-use miner::{MinerConfig, Miner, Client};
-use std::path::PathBuf;
-use std::fs;
-use crossbeam_channel::unbounded;
-use std::thread;
-use ckb_logger::Config as LogConfig;
+use crate::sentry::{sentry_init, SentryConfig};
 use ckb_build_info::Version;
+use ckb_logger::Config as LogConfig;
+use miner::{Client, Miner, MinerConfig};
 use serde_derive::{Deserialize, Serialize};
+use std::fs;
+use std::path::PathBuf;
 
 pub const MINER_CONFIG_FILE_NAME: &str = "ckb-miner.toml";
 
@@ -24,17 +22,11 @@ pub struct AppConfig {
 fn main() {
     if let Ok(config) = read_config(None) {
         let version = get_version();
-        let _logger_guard = ckb_logger::init(config.logger.clone()).expect("Init logger failed!");
+        let _logger_guard = ckb_logger::init(config.logger).expect("Init logger failed!");
         let _sentry_guard = sentry_init(&config.sentry, &version);
 
-        let (new_work_tx, new_work_rx) = unbounded();
-        let mut client = Client::new(new_work_tx, config.miner.clone());
-        let mut miner = Miner::new(client.clone(), new_work_rx, config.miner.clone());
-
-        thread::Builder::new()
-            .name("client".to_string())
-            .spawn(move || client.poll_block_template())
-            .expect("Start client failed!");
+        let client = Client::new(config.miner.clone());
+        let mut miner = Miner::new(client, config.miner);
 
         miner.run();
     }

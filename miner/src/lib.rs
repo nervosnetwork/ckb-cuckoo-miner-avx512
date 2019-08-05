@@ -16,6 +16,7 @@ use ckb_hash::blake2b_256;
 use numext_fixed_hash::H256;
 use numext_fixed_uint::U256;
 
+#[derive(Debug, Clone)]
 pub struct Work {
     work_id: u64,
     block: Block,
@@ -32,4 +33,16 @@ impl From<BlockTemplate> for Work {
             block,
         }
     }
+}
+
+pub fn verify_proof_difficulty(proof: &[u8], difficulty: &U256) -> bool {
+    let proof_hash: H256 = blake2b_256(proof).into();
+    proof_hash < difficulty_to_target(difficulty)
+}
+
+pub fn pow_message(pow_hash: &H256, nonce: u64) -> [u8; 40] {
+    let mut message = [0; 40];
+    message[8..40].copy_from_slice(&pow_hash[..]);
+    LittleEndian::write_u64(&mut message, nonce);
+    message
 }

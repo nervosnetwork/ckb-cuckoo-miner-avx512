@@ -1,4 +1,5 @@
 use ckb_build_info::Version;
+use ckb_logger::info_target;
 use sentry::{
     configure_scope, init,
     integrations::panic::register_panic_handler,
@@ -9,7 +10,6 @@ use sentry::{
 use serde_derive::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::sync::Arc;
-use ckb_logger::info_target;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SentryConfig {
@@ -29,9 +29,9 @@ pub fn sentry_init(config: &SentryConfig, version: &Version) -> Option<ClientIni
         info_target!(
             "sentry",
             "**Notice**: \
-                The ckb process will send stack trace to sentry on Rust panics. \
-                This is enabled by default before mainnet, which can be opted out by setting \
-                the option `dsn` to empty in the config file. The DSN is now {}",
+             The ckb process will send stack trace to sentry on Rust panics. \
+             This is enabled by default before mainnet, which can be opted out by setting \
+             the option `dsn` to empty in the config file. The DSN is now {}",
             config.dsn
         );
 

@@ -15,6 +15,7 @@ pub enum WorkerMessage {
     NewWork(H256),
 }
 
+#[derive(Clone)]
 pub struct WorkerController {
     inner: Vec<Sender<WorkerMessage>>,
 }

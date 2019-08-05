@@ -7,19 +7,20 @@ use ckb_core::block::BlockBuilder;
 use ckb_core::header::Seal;
 use ckb_logger::{debug, error, info};
 use ckb_util::Mutex;
-use crossbeam_channel::{select, unbounded, Receiver};
+use std::sync::Arc;
+use crossbeam_channel::{unbounded, Receiver};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use lru_cache::LruCache;
 use numext_fixed_hash::H256;
 use std::thread;
+use std::time;
 
 const WORK_CACHE_SIZE: usize = 32;
 
 pub struct Miner {
     pub client: Client,
-    pub works: Mutex<LruCache<H256, Work>>,
+    pub works: Arc<Mutex<LruCache<H256, Work>>>,
     pub worker_controller: WorkerController,
-    pub work_rx: Receiver<Work>,
     pub seal_rx: Receiver<(H256, Seal)>,
     pub pb: ProgressBar,
     pub seals_found: u64,
@@ -29,7 +30,6 @@ pub struct Miner {
 impl Miner {
     pub fn new(
         client: Client,
-        work_rx: Receiver<Work>,
         config: MinerConfig,
     ) -> Miner {
         let (seal_tx, seal_rx) = unbounded();
@@ -46,50 +46,55 @@ impl Miner {
             mp.join().expect("MultiProgress join failed");
         });
 
+        let works = Arc::new(Mutex::new(LruCache::new(WORK_CACHE_SIZE)));
+        
+        {
+            let (works, worker_controller, mut client) = (Arc::clone(&works), worker_controller.clone(), client.clone());
+
+            thread::spawn(move || {
+                loop {
+                    if let Some(work) = client.poll_new_work() {
+                        let pow_hash = work.block.header().pow_hash();
+                        if works.lock().insert(pow_hash.clone(), work).is_none() {
+                            worker_controller.send_message(WorkerMessage::NewWork(pow_hash));
+                        }
+                    }
+                    thread::sleep(time::Duration::from_millis(config.poll_interval));
+                }
+            });
+        }
+
         Miner {
-            works: Mutex::new(LruCache::new(WORK_CACHE_SIZE)),
+            works: works,
             seals_found: 0,
             client,
             worker_controller,
-            work_rx,
             seal_rx,
             pb,
             stderr_is_tty,
         }
     }
 
+
     pub fn run(&mut self) {
         loop {
-            select! {
-                recv(self.work_rx) -> msg => match msg {
-                    Ok(work) => {
-                        let pow_hash = work.block.header().pow_hash();
-                        self.works.lock().insert(pow_hash.clone(), work);
-                        self.notify_workers(WorkerMessage::NewWork(pow_hash));
-                    },
-                    _ => {
-                        error!("work_rx closed");
-                        break;
-                    },
+            match self.seal_rx.recv() {
+                Ok((pow_hash, seal)) => self.check_seal(pow_hash, seal),
+                _ => {
+                    error!("seal_rx closed");
+                    break;
                 },
-                recv(self.seal_rx) -> msg => match msg {
-                    Ok((pow_hash, seal)) => self.check_seal(pow_hash, seal),
-                    _ => {
-                        error!("seal_rx closed");
-                        break;
-                    },
-                }
-            };
+            }
         }
     }
 
     fn check_seal(&mut self, pow_hash: H256, seal: Seal) {
-        if let Some(work) = self.works.lock().get_refresh(&pow_hash) {
+        let new_work = { self.works.lock().get_refresh(&pow_hash).cloned() };
+        if let Some(work) =  new_work {
             if verify_proof_difficulty(&seal.proof(), &work.block.header().difficulty())
             {
-                self.notify_workers(WorkerMessage::Stop);
                 let raw_header = work.block.header().raw().to_owned();
-                let block = BlockBuilder::from_block(work.block.clone())
+                let block = BlockBuilder::from_block(work.block)
                     .header(raw_header.with_seal(seal))
                     .build();
 
@@ -110,8 +115,13 @@ impl Miner {
                 // submit block and poll new work
                 {
                     self.client.submit_block(&work.work_id.to_string(), &block);
-                    self.client.try_update_block_template();
-                    self.notify_workers(WorkerMessage::Start);
+                    // poll new work
+                    if let Some(work) = self.client.poll_new_work() {
+                        let pow_hash = work.block.header().pow_hash();
+                        if self.works.lock().insert(pow_hash.clone(), work).is_none() {
+                            self.worker_controller.send_message(WorkerMessage::NewWork(pow_hash));
+                        }
+                    }
                 }
 
                 // draw progress bar
@@ -130,7 +140,7 @@ impl Miner {
         }
     }
 
-    fn notify_workers(&self, message: WorkerMessage) {
-        self.worker_controller.send_message(message.clone());
-    }
+    // fn notify_workers(&self, message: WorkerMessage) {
+    //     self.worker_controller.send_message(message.clone());
+    // }
 }
