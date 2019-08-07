@@ -129,7 +129,7 @@ int c_solve(uint32_t *prof, uint64_t *nonc, const uint8_t *hash) {
                 for(j=0; j<M; ++j) {
                     graph[j] = -1;
                 }
-                
+
                 for(j=1; j<=m; ++j) {
                     graph[path[j]] = path[j-1];
                 }
@@ -140,8 +140,13 @@ int c_solve(uint32_t *prof, uint64_t *nonc, const uint8_t *hash) {
                     int u = G[j]; ++j;
                     int v = G[j]; ++j;
 
-                    if(graph[u] == v || graph[v] == u) {
+                    if (graph[u] == v) {
                         prof[k] = (j >> 1) - 1;
+                        graph[u] = -1;
+                        ++k;
+                    } else if (graph[v] == u) {
+                        prof[k] = (j >> 1) - 1;
+                        graph[v] = -1;
                         ++k;
                     }
                 }
