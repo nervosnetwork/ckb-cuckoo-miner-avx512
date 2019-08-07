@@ -121,10 +121,16 @@ int c_solve(uint32_t *prof, uint64_t *nonc, const uint8_t *hash) {
                     int u = U[j];
                     int v = V[j];
 
-                    if(graph[u] == v || graph[v] == u) {
+                    if (graph[u] == v) {
                         prof[k] = j;
+                        graph[u] = -1;
+                        ++k;
+                    } else if (graph[v] == u) {
+                        prof[k] = j;
+                        graph[v] = -1;
                         ++k;
                     }
+                    
                 }
                 prof[k] = i;
                 
